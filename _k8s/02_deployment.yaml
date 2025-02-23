@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gossip
+  labels:
+    app: gossip
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: gossip
+  template:
+    metadata:
+      labels:
+        app: gossip
+    spec:
+      containers:
+        - name: gossip
+          image: sf-microk8s.hawk-bluegill.ts.net:32000/gossip:latest
+          ports:
+            - containerPort: 7946
