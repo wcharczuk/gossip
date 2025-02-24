@@ -14,6 +14,8 @@ spec:
       labels:
         app: gossip
     spec:
+      nodeSelector:
+        region: sfo
       containers:
         - name: gossip
           image: sf-microk8s.hawk-bluegill.ts.net:32000/gossip:latest

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/hashicorp/memberlist"
@@ -24,7 +25,7 @@ func main() {
 	}
 
 	shutdown := make(chan os.Signal, 1)
-	signal.Notify(shutdown, os.Interrupt)
+	signal.Notify(shutdown, os.Interrupt, syscall.SIGTERM)
 
 	if err := tryJoin(list, shutdown); err != nil {
 		panic("Failed to join memberlist: " + err.Error())
@@ -56,17 +57,27 @@ func tryJoin(list *memberlist.Memberlist, shutdown chan os.Signal) (err error) {
 }
 
 func runLoop(list *memberlist.Memberlist, shutdown chan os.Signal) {
-	tick := time.NewTicker(time.Second)
+	tick := time.NewTicker(30 * time.Second)
 	defer tick.Stop()
 	for {
 		select {
 		case <-tick.C:
-			fmt.Println("membership tick!")
+			fmt.Println(*gossipName, "membership tick!")
+			if err := list.UpdateNode(10 * time.Second); err != nil {
+				fmt.Fprintf(os.Stderr, "failed to update node: %v\n", err)
+			}
 			for _, member := range list.Members() {
-				fmt.Printf("Member: %s %s\n", member.Name, member.Addr)
+				fmt.Printf(*gossipName, "Member: %s %s\n", member.Name, member.Addr)
 			}
 		case <-shutdown:
-			fmt.Println("shutting down!")
+			fmt.Println(*gossipName, "shutting down!")
+			if err := list.Leave(10 * time.Second); err != nil {
+				fmt.Fprintf(os.Stderr, "failed to leave cluster: %v\n", err)
+			}
+			if err := list.Shutdown(); err != nil {
+				fmt.Fprintf(os.Stderr, "failed to shutdown: %v\n", err)
+			}
+			fmt.Println(*gossipName, "shutting complete")
 		}
 	}
 }
