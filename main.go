@@ -3,9 +3,12 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
+	"log"
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -19,17 +22,19 @@ var (
 func main() {
 	flag.Parse()
 	cfg := memberlist.DefaultLANConfig()
+	cfg.Logger = log.New(io.Discard, "", 0)
 	list, err := memberlist.Create(cfg)
 	if err != nil {
 		panic("Failed to create memberlist: " + err.Error())
 	}
 
 	shutdown := make(chan os.Signal, 1)
-	signal.Notify(shutdown, os.Interrupt, syscall.SIGTERM)
+	signal.Notify(shutdown, syscall.SIGINT, syscall.SIGTERM)
 
 	if err := tryJoin(list, shutdown); err != nil {
 		panic("Failed to join memberlist: " + err.Error())
 	}
+
 	runLoop(list, shutdown)
 }
 
@@ -40,17 +45,6 @@ func tryJoin(list *memberlist.Memberlist, shutdown chan os.Signal) (err error) {
 	tick := time.NewTicker(time.Second)
 	defer tick.Stop()
 
-	var ips []net.IP
-	ips, err = net.LookupIP(*gossipAddr)
-	if err != nil {
-		return
-	}
-
-	var joinList []string
-	for _, ip := range ips {
-		joinList = append(joinList, ip.String())
-	}
-
 	for {
 		select {
 		case <-deadline.C:
@@ -58,6 +52,16 @@ func tryJoin(list *memberlist.Memberlist, shutdown chan os.Signal) (err error) {
 		case <-shutdown:
 			return nil
 		case <-tick.C:
+			var ips []net.IP
+			ips, err = net.LookupIP(*gossipAddr)
+			if err != nil {
+				continue
+			}
+			var joinList []string
+			for _, ip := range ips {
+				joinList = append(joinList, ip.String())
+			}
+			fmt.Printf("Attempting to join %s based on DNS lookup.\n", strings.Join(joinList, ","))
 			_, err = list.Join(joinList)
 			if err != nil {
 				continue
@@ -90,6 +94,7 @@ func runLoop(list *memberlist.Memberlist, shutdown chan os.Signal) {
 				fmt.Fprintf(os.Stderr, "failed to shutdown: %v\n", err)
 			}
 			fmt.Println(hostname, "shutting complete")
+			return
 		}
 	}
 }
