@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"net"
 	"os"
 	"os/signal"
 	"syscall"
@@ -12,13 +13,12 @@ import (
 )
 
 var (
-	gossipAddr = flag.String("gossip-addr", "gossip-srv", "The gossip address")
-	gossipName = flag.String("gossip-name", os.Getenv("HOSTNAME"), "The gossip name")
+	gossipAddr = flag.String("gossip-addr", "gossip-srv.gossip", "The gossip address")
 )
 
 func main() {
+	flag.Parse()
 	cfg := memberlist.DefaultLANConfig()
-	cfg.Name = *gossipName
 	list, err := memberlist.Create(cfg)
 	if err != nil {
 		panic("Failed to create memberlist: " + err.Error())
@@ -40,6 +40,17 @@ func tryJoin(list *memberlist.Memberlist, shutdown chan os.Signal) (err error) {
 	tick := time.NewTicker(time.Second)
 	defer tick.Stop()
 
+	var ips []net.IP
+	ips, err = net.LookupIP(*gossipAddr)
+	if err != nil {
+		return
+	}
+
+	var joinList []string
+	for _, ip := range ips {
+		joinList = append(joinList, ip.String())
+	}
+
 	for {
 		select {
 		case <-deadline.C:
@@ -47,7 +58,7 @@ func tryJoin(list *memberlist.Memberlist, shutdown chan os.Signal) (err error) {
 		case <-shutdown:
 			return nil
 		case <-tick.C:
-			_, err = list.Join([]string{*gossipAddr})
+			_, err = list.Join(joinList)
 			if err != nil {
 				continue
 			}
@@ -57,27 +68,28 @@ func tryJoin(list *memberlist.Memberlist, shutdown chan os.Signal) (err error) {
 }
 
 func runLoop(list *memberlist.Memberlist, shutdown chan os.Signal) {
+	hostname, _ := os.Hostname()
 	tick := time.NewTicker(30 * time.Second)
 	defer tick.Stop()
 	for {
 		select {
 		case <-tick.C:
-			fmt.Println(*gossipName, "membership tick!")
+			fmt.Println(hostname, "membership tick!")
 			if err := list.UpdateNode(10 * time.Second); err != nil {
 				fmt.Fprintf(os.Stderr, "failed to update node: %v\n", err)
 			}
 			for _, member := range list.Members() {
-				fmt.Printf(*gossipName, "Member: %s %s\n", member.Name, member.Addr)
+				fmt.Printf("%s has Member: %s %s\n", hostname, member.Name, member.Addr)
 			}
 		case <-shutdown:
-			fmt.Println(*gossipName, "shutting down!")
+			fmt.Println(hostname, "shutting down!")
 			if err := list.Leave(10 * time.Second); err != nil {
 				fmt.Fprintf(os.Stderr, "failed to leave cluster: %v\n", err)
 			}
 			if err := list.Shutdown(); err != nil {
 				fmt.Fprintf(os.Stderr, "failed to shutdown: %v\n", err)
 			}
-			fmt.Println(*gossipName, "shutting complete")
+			fmt.Println(hostname, "shutting complete")
 		}
 	}
 }

@@ -3,9 +3,9 @@ kind: Service
 metadata:
   name: gossip-srv
 spec:
-  type: ClusterIP
   selector:
     app: gossip
+  clusterIP: None
   ports:
     - protocol: TCP
       name: memberlist
