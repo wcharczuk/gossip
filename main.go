@@ -28,8 +28,17 @@ func main() {
 		panic("Failed to create memberlist: " + err.Error())
 	}
 
-	shutdown := make(chan os.Signal, 1)
-	signal.Notify(shutdown, syscall.SIGINT, syscall.SIGTERM)
+	shutdown := make(chan os.Signal, 3)
+	signal.Notify(shutdown, syscall.SIGINT, syscall.SIGABRT, syscall.SIGTERM)
+
+	spy := make(chan os.Signal, 32)
+	go func() {
+		for {
+			sig := <-spy
+			fmt.Printf("got signal! %v\n", sig)
+		}
+	}()
+	signal.Notify(spy)
 
 	if err := tryJoin(list, shutdown); err != nil {
 		panic("Failed to join memberlist: " + err.Error())
@@ -38,11 +47,11 @@ func main() {
 	runLoop(list, shutdown)
 }
 
-func tryJoin(list *memberlist.Memberlist, shutdown chan os.Signal) (err error) {
+func tryJoin(list *memberlist.Memberlist, shutdown <-chan os.Signal) (err error) {
 	deadline := time.NewTimer(60 * time.Second)
 	defer deadline.Stop()
 
-	tick := time.NewTicker(time.Second)
+	tick := time.NewTicker(10 * time.Second)
 	defer tick.Stop()
 
 	for {
@@ -71,7 +80,7 @@ func tryJoin(list *memberlist.Memberlist, shutdown chan os.Signal) (err error) {
 	}
 }
 
-func runLoop(list *memberlist.Memberlist, shutdown chan os.Signal) {
+func runLoop(list *memberlist.Memberlist, shutdown <-chan os.Signal) {
 	hostname, _ := os.Hostname()
 	tick := time.NewTicker(30 * time.Second)
 	defer tick.Stop()
@@ -79,9 +88,6 @@ func runLoop(list *memberlist.Memberlist, shutdown chan os.Signal) {
 		select {
 		case <-tick.C:
 			fmt.Println(hostname, "membership tick!")
-			if err := list.UpdateNode(10 * time.Second); err != nil {
-				fmt.Fprintf(os.Stderr, "failed to update node: %v\n", err)
-			}
 			for _, member := range list.Members() {
 				fmt.Printf("%s has Member: %s %s\n", hostname, member.Name, member.Addr)
 			}
