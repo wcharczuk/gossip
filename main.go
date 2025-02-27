@@ -31,15 +31,6 @@ func main() {
 	shutdown := make(chan os.Signal, 3)
 	signal.Notify(shutdown, syscall.SIGINT, syscall.SIGABRT, syscall.SIGTERM)
 
-	spy := make(chan os.Signal, 32)
-	go func() {
-		for {
-			sig := <-spy
-			fmt.Printf("got signal! %v\n", sig)
-		}
-	}()
-	signal.Notify(spy)
-
 	if err := tryJoin(list, shutdown); err != nil {
 		panic("Failed to join memberlist: " + err.Error())
 	}
