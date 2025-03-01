@@ -1,10 +1,14 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"os"
+	"os/signal"
 	"sync"
+	"syscall"
+	"time"
 )
 
 var (
@@ -20,6 +24,7 @@ func bindAddr() string {
 }
 
 func main() {
+	data = make(map[string]*Metric)
 	http.Handle("/", http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
 		dataMu.Lock()
 		defer dataMu.Unlock()
@@ -29,17 +34,34 @@ func main() {
 	}))
 	http.Handle("/submit", http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
 		var submissionData Submission
-		_ = json.NewDecoder(req.Body).Decode(&submissionData)
+		if err := json.NewDecoder(req.Body).Decode(&submissionData); err != nil {
+			http.Error(rw, "invalid post body: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		dataMu.Lock()
+		defer dataMu.Unlock()
 		for _, e := range submissionData.Values {
 			if _, ok := data[e.Entity]; !ok {
-				dataMu.Lock()
 				data[e.Entity] = new(Metric)
-				dataMu.Unlock()
 			}
 			data[e.Entity].Push(e)
 		}
+		rw.WriteHeader(http.StatusNoContent)
 	}))
-	http.ListenAndServe(bindAddr(), nil)
+
+	server := &http.Server{
+		Addr:    bindAddr(),
+		Handler: http.DefaultServeMux,
+	}
+	shutdown := make(chan os.Signal, 3)
+	signal.Notify(shutdown, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-shutdown
+		timeoutContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		server.Shutdown(timeoutContext)
+	}()
+	server.ListenAndServe()
 }
 
 type Submission struct {
@@ -53,16 +75,13 @@ type EntityValue struct {
 }
 
 type Metric struct {
-	sync.Mutex `json:"-"`
-	Last       uint64
-	Count      uint64
-	Values     []uint64
-	Writers    []string
+	Last    uint64
+	Count   uint64
+	Values  []uint64
+	Writers []string
 }
 
 func (m *Metric) Push(s EntityValue) {
-	m.Lock()
-	defer m.Unlock()
 	m.Last = s.Value
 	m.Count++
 	m.Values = append(m.Values, s.Value)

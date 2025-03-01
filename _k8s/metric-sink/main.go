@@ -9,7 +9,12 @@ import (
 
 func main() {
 	clifactory.Resources{
-		"service":    kube.ServiceVirtualIP("metric-sink", "metric-sink", v1.ServicePort{Name: "http", Protocol: v1.ProtocolTCP, Port: 3000}),
-		"deployment": kube.Deployment("metric-sink", "sf-microk8s.hawk-bluegill.ts.net:32000/metric-sink:latest", kube.OptDeploymentPort("http", 3000, v1.ProtocolTCP)),
+		"service": kube.ServiceVirtualIP("metric-sink", "metric-sink", v1.ServicePort{Name: "http", Protocol: v1.ProtocolTCP, Port: 3000}),
+		"deployment": kube.Deployment(
+			"metric-sink",
+			"sf-microk8s.hawk-bluegill.ts.net:32000/metric-sink:latest",
+			kube.OptDeploymentReplicas(1),
+			kube.OptDeploymentPort("http", 3000, v1.ProtocolTCP),
+		),
 	}.Main()
 }

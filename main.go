@@ -60,15 +60,15 @@ type worker struct {
 }
 
 func (w worker) NotifyJoin(n *memberlist.Node) {
-	slog.Info("node joined", slog.String("name", n.Name))
+	slog.Info("node joined", slog.String("hostname", w.hostname), slog.String("member-name", n.Name))
 }
 
 func (w worker) NotifyLeave(n *memberlist.Node) {
-	slog.Info("node left", slog.String("name", n.Name))
+	slog.Info("node left", slog.String("hostname", w.hostname), slog.String("member-name", n.Name))
 }
 
 func (w worker) NotifyUpdate(n *memberlist.Node) {
-	slog.Info("node update", slog.String("name", n.Name))
+	slog.Info("node update", slog.String("hostname", w.hostname), slog.String("member-name", n.Name))
 }
 
 func (w worker) tryJoin() (err error) {
@@ -92,7 +92,7 @@ func (w worker) tryJoin() (err error) {
 			for _, ip := range ips {
 				joinList = append(joinList, ip.String())
 			}
-			fmt.Printf("Attempting to join %s based on DNS lookup.\n", strings.Join(joinList, ","))
+			slog.Info("attempting to join based on DNS lookup.", slog.String("hostname", w.hostname), slog.String("members", strings.Join(joinList, ",")))
 			_, err = w.list.Join(joinList)
 			if err != nil {
 				continue
@@ -110,7 +110,7 @@ func (w worker) runLoop() error {
 		case <-tick.C:
 			entities, err := w.getEntityList()
 			if err != nil {
-				slog.Error("failed to get entities", slog.Any("err", err))
+				slog.Error("failed to get entities", slog.String("hostname", w.hostname), slog.Any("err", err))
 				continue
 			}
 			members := w.getMembers()
@@ -122,7 +122,12 @@ func (w worker) runLoop() error {
 					matchedEntities = append(matchedEntities, e)
 				}
 			}
-
+			slog.Info("fetching and pushing entity data", slog.String("hostname", w.hostname), slog.Int("entity-count", len(matchedEntities)))
+			if err := w.getAndPushEntities(matchedEntities...); err != nil {
+				slog.Error("failed to get and push entity data", slog.String("hostname", w.hostname), slog.Any("err", err))
+				continue
+			}
+			slog.Info("fetching and pushing entity data complete!", slog.String("hostname", w.hostname), slog.Int("entity-count", len(matchedEntities)))
 		case <-w.shutdown:
 			w.doShutdown()
 			return nil
@@ -131,8 +136,17 @@ func (w worker) runLoop() error {
 }
 
 func (w worker) getEntityList() (entities []string, err error) {
+	started := time.Now()
+	slog.Info("getting entity list", slog.String("hostname", w.hostname))
+	defer func() {
+		if err != nil {
+			slog.Error("getting entity list failed", slog.String("hostname", w.hostname), slog.Duration("elapsed", time.Since(started)), slog.Any("err", err))
+		} else {
+			slog.Info("getting entity list success", slog.String("hostname", w.hostname), slog.Duration("elapsed", time.Since(started)))
+		}
+	}()
 	var res *http.Response
-	res, err = http.Get("data-plane:3000/")
+	res, err = http.Get("http://data-plane:3000/")
 	if err != nil {
 		return nil, err
 	}
@@ -146,19 +160,32 @@ func (w worker) getAndPushEntities(entities ...string) error {
 	if err != nil {
 		return err
 	}
-	return w.pushEntities(data)
+	return w.pushEntities(data.Entities)
 }
 
-func (w worker) getEntityData(entities ...string) (data map[string]uint64, err error) {
+type entityDataResponse struct {
+	Entities map[string]uint64
+}
+
+func (w worker) getEntityData(entities ...string) (data entityDataResponse, err error) {
+	started := time.Now()
+	slog.Info("getting entity data", slog.String("hostname", w.hostname))
+	defer func() {
+		if err != nil {
+			slog.Error("getting entity data failed", slog.String("hostname", w.hostname), slog.Duration("elapsed", time.Since(started)), slog.Any("err", err))
+		} else {
+			slog.Info("getting entity data success", slog.String("hostname", w.hostname), slog.Duration("elapsed", time.Since(started)))
+		}
+	}()
 	u, _ := url.Parse("http://data-plane:3000/data")
 	u.RawQuery = fmt.Sprintf("s=%s", strings.Join(entities, ","))
 	var res *http.Response
 	res, err = http.Get(u.String())
 	if err != nil {
-		return nil, err
+		return
 	}
 	defer res.Body.Close()
-	err = json.NewDecoder(res.Body).Decode(&entities)
+	err = json.NewDecoder(res.Body).Decode(&data)
 	return
 }
 
@@ -173,6 +200,11 @@ type EntityValue struct {
 }
 
 func (w worker) pushEntities(values map[string]uint64) error {
+	started := time.Now()
+	slog.Info("pushing entity data", slog.String("hostname", w.hostname))
+	defer func() {
+		slog.Info("pushing entity data complete", slog.String("hostname", w.hostname), slog.Duration("elapsed", time.Since(started)))
+	}()
 	var submission Submission
 	for key, value := range values {
 		submission.Values = append(submission.Values, EntityValue{
@@ -207,12 +239,12 @@ func (w worker) getMembers() (memberNames []string) {
 }
 
 func (w worker) doShutdown() {
-	fmt.Println(w.hostname, "shutting down!")
+	slog.Info("shutting down", slog.String("hostname", w.hostname))
 	if err := w.list.Leave(10 * time.Second); err != nil {
-		fmt.Fprintf(os.Stderr, "%s failed to leave cluster: %v\n", w.hostname, err)
+		slog.Error("failed to leave cluster", slog.String("hostname", w.hostname), slog.Any("err", err))
 	}
 	if err := w.list.Shutdown(); err != nil {
-		fmt.Fprintf(os.Stderr, "%s failed to shutdown: %v\n", w.hostname, err)
+		slog.Error("failed to shutdown", slog.String("hostname", w.hostname), slog.Any("err", err))
 	}
-	fmt.Println(w.hostname, "shutting complete")
+	slog.Info("shutdown complete", slog.String("hostname", w.hostname))
 }
