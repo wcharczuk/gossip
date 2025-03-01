@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"gossip/pkg/consistenthash"
+	"gossip/pkg/types"
 	"io"
 	"log"
 	"log/slog"
@@ -103,7 +104,7 @@ func (w worker) tryJoin() (err error) {
 }
 
 func (w worker) runLoop() error {
-	tick := time.NewTicker(30 * time.Second)
+	tick := time.NewTicker(10 * time.Second)
 	defer tick.Stop()
 	for {
 		select {
@@ -163,11 +164,7 @@ func (w worker) getAndPushEntities(entities ...string) error {
 	return w.pushEntities(data.Entities)
 }
 
-type entityDataResponse struct {
-	Entities map[string]uint64
-}
-
-func (w worker) getEntityData(entities ...string) (data entityDataResponse, err error) {
+func (w worker) getEntityData(entities ...string) (data types.DataPlaneResponse, err error) {
 	started := time.Now()
 	slog.Info("getting entity data", slog.String("hostname", w.hostname))
 	defer func() {
@@ -189,25 +186,15 @@ func (w worker) getEntityData(entities ...string) (data entityDataResponse, err 
 	return
 }
 
-type Submission struct {
-	Values []EntityValue
-}
-
-type EntityValue struct {
-	Entity   string
-	Hostname string
-	Value    uint64
-}
-
-func (w worker) pushEntities(values map[string]uint64) error {
+func (w worker) pushEntities(values map[string]int64) error {
 	started := time.Now()
 	slog.Info("pushing entity data", slog.String("hostname", w.hostname))
 	defer func() {
 		slog.Info("pushing entity data complete", slog.String("hostname", w.hostname), slog.Duration("elapsed", time.Since(started)))
 	}()
-	var submission Submission
+	var submission types.MetricSinkSubmission
 	for key, value := range values {
-		submission.Values = append(submission.Values, EntityValue{
+		submission.Values = append(submission.Values, types.MetricSinkSubmissionValue{
 			Entity:   key,
 			Hostname: w.hostname,
 			Value:    value,

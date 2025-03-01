@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"gossip/pkg/types"
 	"net/http"
 	"os"
 	"os/signal"
@@ -13,7 +14,7 @@ import (
 
 var (
 	dataMu sync.Mutex
-	data   map[string]*Metric
+	data   map[string]*metric
 )
 
 func bindAddr() string {
@@ -24,7 +25,7 @@ func bindAddr() string {
 }
 
 func main() {
-	data = make(map[string]*Metric)
+	data = make(map[string]*metric)
 	http.Handle("/", http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
 		dataMu.Lock()
 		defer dataMu.Unlock()
@@ -33,7 +34,7 @@ func main() {
 		_ = json.NewEncoder(rw).Encode(data)
 	}))
 	http.Handle("/submit", http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
-		var submissionData Submission
+		var submissionData types.MetricSinkSubmission
 		if err := json.NewDecoder(req.Body).Decode(&submissionData); err != nil {
 			http.Error(rw, "invalid post body: "+err.Error(), http.StatusBadRequest)
 			return
@@ -42,13 +43,12 @@ func main() {
 		defer dataMu.Unlock()
 		for _, e := range submissionData.Values {
 			if _, ok := data[e.Entity]; !ok {
-				data[e.Entity] = new(Metric)
+				data[e.Entity] = new(metric)
 			}
 			data[e.Entity].Push(e)
 		}
 		rw.WriteHeader(http.StatusNoContent)
 	}))
-
 	server := &http.Server{
 		Addr:    bindAddr(),
 		Handler: http.DefaultServeMux,
@@ -64,26 +64,16 @@ func main() {
 	server.ListenAndServe()
 }
 
-type Submission struct {
-	Values []EntityValue
-}
-
-type EntityValue struct {
-	Entity   string
-	Hostname string
-	Value    uint64
-}
-
-type Metric struct {
-	Last    uint64
+type metric struct {
+	Last    time.Duration
 	Count   uint64
-	Values  []uint64
+	Values  []time.Duration
 	Writers []string
 }
 
-func (m *Metric) Push(s EntityValue) {
-	m.Last = s.Value
+func (m *metric) Push(s types.MetricSinkSubmissionValue) {
+	m.Last = time.Duration(s.Value)
 	m.Count++
-	m.Values = append(m.Values, s.Value)
+	m.Values = append(m.Values, time.Duration(s.Value))
 	m.Writers = append(m.Writers, s.Hostname)
 }

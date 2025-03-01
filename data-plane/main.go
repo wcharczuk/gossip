@@ -4,10 +4,11 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"gossip/pkg/types"
 	"net/http"
 	"os"
 	"strings"
-	"sync/atomic"
+	"time"
 
 	_ "embed"
 )
@@ -30,7 +31,7 @@ func main() {
 	symbols := getSymbols()
 	entities = make(map[string]*Entity, len(symbols))
 	for _, symbol := range symbols {
-		entities[symbol] = &Entity{0}
+		entities[symbol] = &Entity{LastSeen: time.Now()}
 	}
 	http.Handle("/", http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
 		response := make([]string, 0, len(entities))
@@ -46,16 +47,16 @@ func main() {
 		if rawRequestSymbols := req.URL.Query().Get("s"); rawRequestSymbols != "" {
 			requestSymbols = strings.Split(rawRequestSymbols, ",")
 		}
-		response := Response{
-			Entities: make(map[string]uint64),
+		response := types.DataPlaneResponse{
+			Entities: make(map[string]int64),
 		}
 		if len(requestSymbols) > 0 {
 			for _, requestSymbol := range requestSymbols {
-				response.Entities[requestSymbol] = entities[requestSymbol].Increment()
+				response.Entities[requestSymbol] = int64(entities[requestSymbol].Increment())
 			}
 		} else {
 			for symbol, entity := range entities {
-				response.Entities[symbol] = entity.Increment()
+				response.Entities[symbol] = int64(entity.Increment())
 			}
 		}
 		rw.Header().Set("Content-Type", "application/json")
@@ -65,16 +66,15 @@ func main() {
 	_ = http.ListenAndServe(bindAddr(), nil)
 }
 
-type Response struct {
-	Entities map[string]uint64
-}
-
 type Entity struct {
-	Value uint64
+	LastSeen time.Time
 }
 
-func (e *Entity) Increment() uint64 {
-	return atomic.AddUint64(&e.Value, 1)
+func (e *Entity) Increment() time.Duration {
+	now := time.Now()
+	elapsed := now.Sub(e.LastSeen)
+	e.LastSeen = time.Now()
+	return elapsed
 }
 
 func getSymbols() (symbols []string) {
