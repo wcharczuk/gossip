@@ -5,6 +5,7 @@ WORKDIR "/go/src"
 ADD go.mod /go/src/go.mod
 ADD go.sum /go/src/go.sum
 ADD vendor /go/src/vendor
+ADD pkg /go/src/pkg
 ADD main.go /go/src/main.go
 
 ENV GOOS=linux
